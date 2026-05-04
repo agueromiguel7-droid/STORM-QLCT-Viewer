@@ -190,12 +190,13 @@ NAV_PREMISES = "📋 Analysis Premises"
 if 'nav_page' not in st.session_state:
     st.session_state['nav_page'] = NAV_PREMISES
 if '_sel_scenario' not in st.session_state:
-    st.session_state['_sel_scenario'] = scenario_names[0]
+    st.session_state['_sel_scenario'] = None
 
 # Analysis Premises button
 if st.sidebar.button(NAV_PREMISES, width="stretch",
                      type="primary" if st.session_state['nav_page'] == NAV_PREMISES else "secondary"):
     st.session_state['nav_page'] = NAV_PREMISES
+    st.session_state['_sel_scenario'] = None
     st.rerun()
 
 st.sidebar.markdown("<hr style='border:none; border-top:1px solid #e2e8f0; margin:10px 0;'>", unsafe_allow_html=True)
@@ -203,27 +204,30 @@ st.sidebar.markdown("<h3 style='color: #718096; font-size: 0.85rem; font-weight:
 
 # on_change callback: called ONLY when user clicks a different scenario
 def _on_scenario_change():
-    st.session_state['nav_page'] = st.session_state['_sel_scenario']
+    if st.session_state['_sel_scenario'] is not None:
+        st.session_state['nav_page'] = st.session_state['_sel_scenario']
 
 # Scenario radio — backed by session state key, on_change fires only on real user interaction
-# Note: do NOT pass index= when using key=, as session_state is the single source of truth
 sel_esc_name = st.sidebar.radio(
     "Select Scenario", scenario_names,
+    index=None,
     key='_sel_scenario',
     on_change=_on_scenario_change,
     label_visibility="collapsed"
 )
 
-sel_sc = next(s for s in scenarios if s['params'].get('esc_name', s['_filename']) == sel_esc_name)
+active_esc_name = sel_esc_name if sel_esc_name is not None else scenario_names[0]
+
+sel_sc = next(s for s in scenarios if s['params'].get('esc_name', s['_filename']) == active_esc_name)
 sel_color = sel_sc['_color']
 
 # Scenario Image
 search_names = [
-    sel_esc_name, 
-    sel_esc_name.replace("Sc.", "Scenario").strip(),
-    sel_esc_name.replace("Sce.", "Scenario").strip()
+    active_esc_name, 
+    active_esc_name.replace("Sc.", "Scenario").strip(),
+    active_esc_name.replace("Sce.", "Scenario").strip()
 ]
-if sel_esc_name == "Case Base":
+if active_esc_name == "Case Base":
     search_names.append("Base Case")
 
 scen_img = None
@@ -236,9 +240,9 @@ if st.session_state['nav_page'] != NAV_PREMISES:
     if scen_img:
         st.sidebar.image(scen_img)
     else:
-        st.sidebar.warning(f"⚠️ Image not found. Save it as: `assets/{sel_esc_name}.png`")
-    scen_desc = sel_sc['params'].get('esc_desc', f'Approved development plan considering all activities for {sel_esc_name}.')
-    st.sidebar.info(f"**{sel_esc_name}:** {scen_desc}")
+        st.sidebar.warning(f"⚠️ Image not found. Save it as: `assets/{active_esc_name}.png`")
+    scen_desc = sel_sc['params'].get('esc_desc', f'Approved development plan considering all activities for {active_esc_name}.')
+    st.sidebar.info(f"**{active_esc_name}:** {scen_desc}")
 
 st.sidebar.markdown("<hr style='border:none; border-top:1px solid #e2e8f0; margin:10px 0;'>", unsafe_allow_html=True)
 username_display = st.session_state['username'].capitalize() if st.session_state['username'] else 'User'
@@ -462,8 +466,8 @@ if st.session_state.get('nav_page') == NAV_PREMISES:
     st.stop()
 
 # When a scenario is selected via radio, sync nav_page
-if st.session_state.get('nav_page') != sel_esc_name and st.session_state.get('nav_page') != NAV_PREMISES:
-    st.session_state['nav_page'] = sel_esc_name
+if st.session_state.get('nav_page') != active_esc_name and st.session_state.get('nav_page') != NAV_PREMISES:
+    st.session_state['nav_page'] = active_esc_name
 
 
 # ─── PLOTTING HELPERS ────────────────────────────────────────────────────────
@@ -552,7 +556,7 @@ for col, (label, val) in zip(m_cols, metrics):
     col.metric(label, val)
 
 # ─── SECTION 2: TABS ─────────────────────────────────────────────────────────
-st.markdown(f"### 🔍 Detailed Inspection: {sel_esc_name}")
+st.markdown(f"### 🔍 Detailed Inspection: {active_esc_name}")
 t_bubble, t_det1, t_det2, t_det3, t_det4, t_det5, t_det6a, t_det6b, t_det7 = st.tabs([
     "📊 KPI Analysis", "🏗️ Fiscal Waterfall", "🛢️ Forecasts", "💸 Expenditures", 
     "📈 NPV Distributions", "💼 Cash Flow", "🎯 Corner Solutions 1", "🎯 Corner Solutions 2",
@@ -1332,9 +1336,19 @@ with t_det7:
             ][:len(df_gt_res.columns)]
         
         # Read Target GT from JSON (params or root)
-        target_gt = sel_sc['params'].get('target_gt')
-        if target_gt is None: 
-            target_gt = sel_sc.get('target_gt', 50.0) # Fallback to 50.0 if missing
+        target_gt_val = sel_sc['params'].get('target_gt')
+        if target_gt_val is None: 
+            target_gt_val = sel_sc.get('target_gt')
+            
+        if target_gt_val is None:
+            if not df_gt_res.empty and 'Government Take (%)' in df_gt_res.columns:
+                # Infer target from the median of the optimization results (round to nearest 5%)
+                inferred = round(df_gt_res['Government Take (%)'].median() / 5.0) * 5.0
+                target_gt_val = float(inferred)
+            else:
+                target_gt_val = 50.0 # Fallback
+        
+        target_gt = target_gt_val
         
         st.markdown("---")
         st.subheader("📊 HPOC Optimization Dashboard: NPV vs. Government Take")
