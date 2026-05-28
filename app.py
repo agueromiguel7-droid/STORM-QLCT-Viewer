@@ -678,7 +678,7 @@ with t_det3:
     capex_m = np.mean(cf.get('capex', []), axis=0) if len(cf.get('capex', [])) else []
     opex_m  = np.mean(cf.get('opex', []), axis=0) if len(cf.get('opex', [])) else []
     abex_m  = np.mean(cf.get('abex', []), axis=0) if len(cf.get('abex', [])) else []
-    
+
     c_cap, c_op, c_ab = st.columns(3)
     card_tpl = """
     <div style="background: white; border-left: 5px solid #00d4ff; padding: 12px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 15px;">
@@ -692,22 +692,54 @@ with t_det3:
     with c_cap: st.markdown(card_tpl.format(label="TOTAL CAPEX", vp=f"{np.mean(ind_det.get('npv_capex', [0])):.2f}", nominal=f"{np.sum(capex_m):.2f}"), unsafe_allow_html=True)
     with c_op:  st.markdown(card_tpl.format(label="TOTAL OPEX",  vp=f"{np.mean(ind_det.get('npv_opex', [0])):.2f}",  nominal=f"{np.sum(opex_m):.2f}"),  unsafe_allow_html=True)
     with c_ab:  st.markdown(card_tpl.format(label="TOTAL ABEX",  vp=f"{np.mean(ind_det.get('npv_abex', [0])):.2f}",  nominal=f"{np.sum(abex_m):.2f}"),  unsafe_allow_html=True)
-    
+
     if len(capex_m) > 0:
         c_exp1, c_exp2 = st.columns([2, 1])
-        
+
         with c_exp1:
-            cum_c = np.cumsum(np.array(capex_m) + np.array(opex_m) + np.array(abex_m))
+            # ── Series selector checkboxes ──────────────────────────────────
+            st.markdown(
+                "<div style='font-size:0.82rem; font-weight:700; color:#718096; "
+                "text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;'>"
+                "🔍 Series Selection for Chart and Cumulative Cost:</div>",
+                unsafe_allow_html=True
+            )
+            chk_col1, chk_col2, chk_col3 = st.columns(3)
+            with chk_col1:
+                show_capex = st.checkbox("Include CAPEX", value=True, key="chk_capex")
+            with chk_col2:
+                show_opex  = st.checkbox("Include OPEX",  value=True, key="chk_opex")
+            with chk_col3:
+                show_abex  = st.checkbox("Include ABEX",  value=True, key="chk_abex")
+
+            # ── Build cumulative only from active series ─────────────────────
+            cum_arr = np.zeros(len(capex_m))
+            if show_capex: cum_arr = cum_arr + np.array(capex_m)
+            if show_opex:  cum_arr = cum_arr + np.array(opex_m)
+            if show_abex:  cum_arr = cum_arr + np.array(abex_m)
+            cum_c = np.cumsum(cum_arr)
+
             fig_exp = go.Figure()
-            fig_exp.add_trace(go.Bar(x=dates, y=capex_m, name='CAPEX', marker_color='#1f77b4'))
-            fig_exp.add_trace(go.Bar(x=dates, y=opex_m,  name='OPEX',  marker_color='#ff7f0e'))
-            fig_exp.add_trace(go.Bar(x=dates, y=abex_m,  name='ABEX',  marker_color='#2ca02c'))
-            fig_exp.add_trace(go.Scatter(x=dates, y=cum_c, name='Cumulative Cost', yaxis='y2', line=dict(color='black', width=3)))
-            fig_exp.update_layout(barmode='stack', title="Expected Investments and Expenditures (Monte Carlo Mean)",
-                                  xaxis_title="Date", yaxis_title="Monthly Disbursement (MMUSD)",
-                                  yaxis2=dict(title="Cumulative Cost (MMUSD)", overlaying='y', side='right'),
-                                  legend=dict(orientation='h', yanchor='top', y=-0.2, xanchor='center', x=0.5),
-                                  paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(b=100), hovermode='x unified')
+            if show_capex:
+                fig_exp.add_trace(go.Bar(x=dates, y=capex_m, name='CAPEX', marker_color='#1f77b4'))
+            if show_opex:
+                fig_exp.add_trace(go.Bar(x=dates, y=opex_m,  name='OPEX',  marker_color='#ff7f0e'))
+            if show_abex:
+                fig_exp.add_trace(go.Bar(x=dates, y=abex_m,  name='ABEX',  marker_color='#2ca02c'))
+            fig_exp.add_trace(go.Scatter(
+                x=dates, y=cum_c, name='Cumulative Cost',
+                yaxis='y2', line=dict(color='black', width=3)
+            ))
+            fig_exp.update_layout(
+                barmode='stack',
+                title="Expected Investments and Expenditures (Monte Carlo Mean)",
+                xaxis_title="Date",
+                yaxis_title="Monthly Disbursement (MMUSD)",
+                yaxis2=dict(title="Cumulative Cost (MMUSD)", overlaying='y', side='right'),
+                legend=dict(orientation='h', yanchor='top', y=-0.2, xanchor='center', x=0.5),
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                margin=dict(b=100), hovermode='x unified'
+            )
             st.plotly_chart(fig_exp, width="stretch")
 
         with c_exp2:
@@ -721,7 +753,7 @@ with t_det3:
                 p.get('n_terminaciones', 0)
             ]
             total_act = sum(act_vals)
-            
+
             fig_act = go.Figure(go.Bar(
                 x=act_names,
                 y=act_vals,
@@ -738,6 +770,158 @@ with t_det3:
                 margin=dict(b=100, t=80)
             )
             st.plotly_chart(fig_act, width="stretch")
+
+        # ── Pie Charts: Cost Breakdown ────────────────────────────────────────
+        st.markdown("<hr style='border:none; border-top:1px solid #e2e8f0; margin:24px 0 16px 0;'>", unsafe_allow_html=True)
+
+        # ── Header row: title left, toggle right ──────────────────────────────
+        hdr_left, hdr_right = st.columns([3, 1])
+        with hdr_left:
+            st.markdown(
+                "<div style='font-size:0.82rem; font-weight:700; color:#718096; "
+                "text-transform:uppercase; letter-spacing:1px; padding-top:6px;'>"
+                "📊 Cost Structure Breakdown (Monte Carlo Mean)</div>",
+                unsafe_allow_html=True
+            )
+        with hdr_right:
+            st.markdown("""
+            <style>
+            div[data-testid="stRadio"][id="pie_mode_radio"] > label { display: none; }
+            div[data-testid="stRadio"][id="pie_mode_radio"] > div {
+                display: flex; flex-direction: row; gap: 0px;
+                border: 1.5px solid #ff4b4b; border-radius: 6px; overflow: hidden;
+                width: fit-content; margin-left: auto;
+            }
+            div[data-testid="stRadio"][id="pie_mode_radio"] > div > label {
+                padding: 5px 14px; font-size: 0.78rem; font-weight: 600;
+                cursor: pointer; margin: 0; border-radius: 0;
+                color: #ff4b4b; background: white; border: none;
+                transition: all 0.2s ease;
+            }
+            div[data-testid="stRadio"][id="pie_mode_radio"] > div > label:has(input:checked) {
+                background: #ff4b4b; color: white;
+            }
+            div[data-testid="stRadio"][id="pie_mode_radio"] > div > label:first-child {
+                border-right: 1.5px solid #ff4b4b;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            pie_mode = st.radio(
+                "Pie display mode",
+                options=["Porcentajes (%)", "Monto (MMUSD)"],
+                index=0,
+                horizontal=True,
+                key="pie_mode_radio",
+                label_visibility="collapsed"
+            )
+
+        show_pct = (pie_mode == "Porcentajes (%)")
+        eg = sel_sc.get('egresos_detallados', {})
+
+        def _pie_val(section, key):
+            arr = section.get(key, None)
+            if arr is None: return 0.0
+            try: return float(np.sum(arr))
+            except Exception: return 0.0
+
+        def _make_pie(labels, values, title, colors, show_pct=True):
+            filtered = [(l, v) for l, v in zip(labels, values) if v > 0]
+            if not filtered: return None
+            lbl, val = zip(*filtered)
+            total = sum(val)
+
+            # Position: outside for tiny slices (<3%), inside for the rest
+            TINY_THRESHOLD = 0.03
+            positions = ["outside" if v / total < TINY_THRESHOLD else "inside" for v in val]
+            # Pull tiny slices slightly for visual separation
+            pulls = [0.08 if v / total < TINY_THRESHOLD else 0.0 for v in val]
+
+            if show_pct:
+                text_vals  = [f"{l}<br>{v/total*100:.2f}%" if v/total < TINY_THRESHOLD
+                              else f"{v/total*100:.1f}%" for l, v in zip(lbl, val)]
+                hover_tmpl = '<b>%{label}</b><br>%{percent:.2%}<extra></extra>'
+            else:
+                text_vals  = [f"{l}<br>{v:.3f}" if v/total < TINY_THRESHOLD
+                              else f"{v:.2f}" for l, v in zip(lbl, val)]
+                hover_tmpl = '<b>%{label}</b><br>%{value:.3f} MMUSD<extra></extra>'
+
+            fig = go.Figure(go.Pie(
+                labels=list(lbl),
+                values=list(val),
+                hole=0.40,
+                text=text_vals,
+                textinfo='text',
+                textposition=positions,
+                pull=pulls,
+                marker=dict(colors=colors[:len(lbl)], line=dict(color='white', width=2.5)),
+                hovertemplate=hover_tmpl,
+                insidetextorientation='radial',
+                sort=False,
+                automargin=True
+            ))
+            fig.update_layout(
+                title=dict(text=f"<b>{title}</b>", font=dict(size=15, color='#0c1c3e'), x=0.5, xanchor='center'),
+                showlegend=True,
+                legend=dict(orientation='h', yanchor='top', y=-0.08, xanchor='center', x=0.5, font=dict(size=10, color='#4a5568')),
+                paper_bgcolor='rgba(0,0,0,0)', margin=dict(t=50, b=80, l=30, r=30), height=370
+            )
+            return fig
+
+        NA_CARD = (
+            "<div style='display:flex; flex-direction:column; align-items:center; justify-content:center; "
+            "height:300px; background:#f8fafc; border:2px dashed #cbd5e0; border-radius:12px; color:#a0aec0;'>"
+            "<span style='font-size:2.2rem; color:#fc8181;'>🚫</span>"
+            "<span style='font-size:0.9rem; font-weight:700; margin-top:10px; color:#718096;'>No aplica para este proyecto</span>"
+            "</div>"
+        )
+
+        cap_eg   = eg.get('capex', {})
+        opex_eg  = eg.get('opex', {})
+        abex_eg  = eg.get('abex', {})
+
+        capex_labels = ["Infraestructura", "Perforación", "RMA", "Exploración"]
+        capex_vals   = [
+            _pie_val(cap_eg,  "CAPEX Infra - Media (MMUSD)"),
+            _pie_val(cap_eg,  "CAPEX Pozo + Desarrollo - Media (MMUSD)"),
+            _pie_val(cap_eg,  "OPEX RMA -Media (MMUSD)"),
+            _pie_val(cap_eg,  "CAPEX Exploración - Media (MMUSD)"),
+        ]
+        capex_colors = ["#1f77b4", "#17becf", "#aec7e8", "#6baed6"]
+
+        opex_labels = ["Fijo", "RME", "Variable", "Mano de Obra", "Administración", "Otros Egresos"]
+        opex_vals   = [
+            _pie_val(opex_eg, "OPEX Fijo -Media (MMUSD)"),
+            _pie_val(opex_eg, "OPEX RME -Media (MMUSD)"),
+            _pie_val(opex_eg, "OPEX Variable -Media (MMUSD)"),
+            _pie_val(opex_eg, "Mano de Obra - Media"),
+            _pie_val(opex_eg, "Administración - Media"),
+            _pie_val(opex_eg, "Otros Egresos - Media"),
+        ]
+        opex_colors = ["#ff7f0e", "#ffbb78", "#d62728", "#ff9896", "#e377c2", "#f7b6d2"]
+
+        abex_labels = ["Infraestructura", "Pozos"]
+        abex_vals   = [
+            _pie_val(abex_eg, "OPEX Abandono Infra -Media (MMUSD)"),
+            _pie_val(abex_eg, "OPEX Abandono Pozos -Media (MMUSD)"),
+        ]
+        abex_colors = ["#2ca02c", "#98df8a"]
+
+        pie_col1, pie_col2, pie_col3 = st.columns(3)
+
+        with pie_col1:
+            fig_cap_pie = _make_pie(capex_labels, capex_vals, "CAPEX", capex_colors, show_pct)
+            if fig_cap_pie: st.plotly_chart(fig_cap_pie, width="stretch")
+            else: st.markdown(NA_CARD, unsafe_allow_html=True)
+
+        with pie_col2:
+            fig_opex_pie = _make_pie(opex_labels, opex_vals, "OPEX", opex_colors, show_pct)
+            if fig_opex_pie: st.plotly_chart(fig_opex_pie, width="stretch")
+            else: st.markdown(NA_CARD, unsafe_allow_html=True)
+
+        with pie_col3:
+            fig_abex_pie = _make_pie(abex_labels, abex_vals, "ABEX", abex_colors, show_pct)
+            if fig_abex_pie: st.plotly_chart(fig_abex_pie, width="stretch")
+            else: st.markdown(NA_CARD, unsafe_allow_html=True)
 
 with t_det4:
     st.subheader("Net Present Value Distributions (MMUSD)")
