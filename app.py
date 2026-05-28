@@ -537,6 +537,60 @@ def plot_dual(dates, rate_data, cum_data, res_dict, title, y1_lbl, y2_lbl, color
     return fig
 
 
+def plot_reserves(res_dict, title, y_lbl, colors):
+    x_vals = ['1P', '2P', '3P']
+    y_vals = [res_dict.get(k, 0.0) for k in x_vals]
+    text_vals = [f"{v:.1f}" if v is not None else "0.0" for v in y_vals]
+    
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=x_vals,
+        y=y_vals,
+        text=text_vals,
+        textposition='outside',
+        textfont=dict(size=12, color='#1e293b', family="sans-serif"),
+        marker_color=colors,
+        hovertemplate="<b>%{x}</b>: %{y:.1f} " + y_lbl + "<extra></extra>",
+        width=0.45,
+        cliponaxis=False
+    ))
+    
+    fig.update_layout(
+        title=dict(
+            text=title,
+            font=dict(size=16, color='#1e293b', family="sans-serif"),
+            y=0.95,
+            x=0,
+            xanchor='left'
+        ),
+        xaxis=dict(
+            showgrid=False,
+            zeroline=True,
+            zerolinecolor='#cbd5e1',
+            zerolinewidth=1,
+            showline=True,
+            linecolor='#cbd5e1',
+            tickfont=dict(size=12, color='#475569', family="sans-serif")
+        ),
+        yaxis=dict(
+            title=y_lbl,
+            title_font=dict(size=12, color='#64748b', family="sans-serif"),
+            showgrid=True,
+            gridcolor='#f1f5f9',
+            gridwidth=1,
+            zeroline=True,
+            zerolinecolor='#cbd5e1',
+            tickfont=dict(size=11, color='#64748b', family="sans-serif")
+        ),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        margin=dict(t=50, b=30, l=50, r=20),
+        height=380,
+        showlegend=False
+    )
+    return fig
+
+
 # ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 st.title("Executive Financial Dashboard")
 st.markdown("Comparative analysis of pre-calculated economic scenarios.")
@@ -672,6 +726,21 @@ with t_det2:
             dates, np.array(prod_sel.get('Qg', [])), np.array(prod_sel.get('GP', [])),
             sel_sc.get('reserves_gas', {}), "Gas Production Forecast", "Rate (Mcfd)", "Cumulative (Bcf)", "#d62728"
         ), width="stretch")
+
+    # ── Field Reserves Bar Charts ───────────────────────────────────────────
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+    res_col1, res_col2 = st.columns(2)
+    
+    oil_reserves = sel_sc.get('reserves_oil', {})
+    gas_reserves = sel_sc.get('reserves_gas', {})
+    
+    with res_col1:
+        fig_oil_res = plot_reserves(oil_reserves, "Reservas de Aceite (MMb)", "MMb", ['#121626', '#1d70b8', '#5ba4fc'])
+        st.plotly_chart(fig_oil_res, width="stretch")
+        
+    with res_col2:
+        fig_gas_res = plot_reserves(gas_reserves, "Reservas de Gas (MMMpc)", "MMMpc", ['#121626', '#d32f2f', '#ff8a80'])
+        st.plotly_chart(fig_gas_res, width="stretch")
 
 with t_det3:
     st.subheader("Expected Monthly Expenditures")
