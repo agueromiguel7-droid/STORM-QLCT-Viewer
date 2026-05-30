@@ -611,10 +611,10 @@ for col, (label, val) in zip(m_cols, metrics):
 
 # ─── SECTION 2: TABS ─────────────────────────────────────────────────────────
 st.markdown(f"### 🔍 Detailed Inspection: {active_esc_name}")
-t_bubble, t_det1, t_det2, t_det3, t_det4, t_det5, t_det6a, t_det6b, t_det7 = st.tabs([
+t_bubble, t_det1, t_det2, t_det3, t_det4, t_det5, t_det6, t_det7, t_det8 = st.tabs([
     "📊 KPI Analysis", "🏗️ Fiscal Waterfall", "🛢️ Forecasts", "💸 Expenditures", 
-    "📈 NPV Distributions", "💼 Cash Flow", "🎯 Corner Solutions 1", "🎯 Corner Solutions 2",
-    "⚖️ Fiscal Optimization"
+    "📈 NPV Distributions", "💼 Cash Flow", "🎯 Corner Solutions",
+    "⚖️ Fiscal Optimization", "🏦 Self-financing Box & Exhibition"
 ])
 
 # Helpers for aggregations
@@ -947,7 +947,6 @@ with t_det3:
         cap_eg   = eg.get('capex', {})
         opex_eg  = eg.get('opex', {})
         abex_eg  = eg.get('abex', {})
-
         capex_labels = ["Infraestructura", "Perforación", "RMA", "Exploración"]
         capex_vals   = [
             _pie_val(cap_eg,  "CAPEX Infra - Media (MMUSD)"),
@@ -992,6 +991,204 @@ with t_det3:
             if fig_abex_pie: st.plotly_chart(fig_abex_pie, width="stretch")
             else: st.markdown(NA_CARD, unsafe_allow_html=True)
 
+        # ── DRILEX Detailed Interventions Visuals ───────────────────────────
+        df_drilex_list = p.get('df_drilex', [])
+        
+        if df_drilex_list:
+            st.markdown("<hr style='border:none; border-top:1px solid #e2e8f0; margin:24px 0 16px 0;'>", unsafe_allow_html=True)
+            st.markdown("### 🛢️ Análisis Detallado de Intervenciones (DRILEX)")
+            
+            # Occurrence data prep
+            df_drilex_df = pd.DataFrame(df_drilex_list)
+            if not df_drilex_df.empty and 'Fecha' in df_drilex_df.columns:
+                df_drilex_df['Fecha_dt'] = pd.to_datetime(df_drilex_df['Fecha'], dayfirst=True, errors='coerce')
+                
+                # Parse dates of selected scenario
+                sc_dates_dt = pd.to_datetime(dates)
+                if len(sc_dates_dt) > 0:
+                    start_dt = sc_dates_dt[0]
+                    end_dt = sc_dates_dt[-1]
+                    df_filtered = df_drilex_df[(df_drilex_df['Fecha_dt'] >= start_dt) & (df_drilex_df['Fecha_dt'] <= end_dt)].copy()
+                    
+                    if not df_filtered.empty:
+                        # 1. Occurrence bar chart
+                        df_filtered['Mes'] = df_filtered['Fecha_dt'].dt.strftime('%Y-%m')
+                        if 'Cantidad de Pozos' in df_filtered.columns:
+                            df_filtered['Cantidad de Pozos'] = pd.to_numeric(df_filtered['Cantidad de Pozos'], errors='coerce').fillna(1)
+                            df_occ_raw = df_filtered.groupby(['Mes', 'Tipo de Actividad'])['Cantidad de Pozos'].sum().reset_index(name='Ocurrencias')
+                        else:
+                            df_occ_raw = df_filtered.groupby(['Mes', 'Tipo de Actividad']).size().reset_index(name='Ocurrencias')
+                        
+                        min_act_dt = df_filtered['Fecha_dt'].min()
+                        max_act_dt = df_filtered['Fecha_dt'].max()
+                        start_year = min_act_dt.year
+                        end_year = max_act_dt.year
+                        all_months = pd.date_range(start=f"{start_year}-01-01", end=f"{end_year}-12-01", freq='MS')
+                        
+                        all_types = ['Perforación', 'RMA', 'RME']
+                        months_str = all_months.strftime('%Y-%m')
+                        mux = pd.MultiIndex.from_product([months_str, all_types], names=['Mes', 'Tipo de Actividad'])
+                        df_template = pd.DataFrame(index=mux).reset_index()
+                        
+                        df_occ = pd.merge(df_template, df_occ_raw, on=['Mes', 'Tipo de Actividad'], how='left').fillna(0)
+                        df_occ['Ocurrencias'] = pd.to_numeric(df_occ['Ocurrencias'], errors='coerce').fillna(0).astype(int)
+                        df_occ = df_occ.sort_values('Mes')
+                        df_occ['Fecha_Grafica'] = pd.to_datetime(df_occ['Mes'] + '-01')
+                        
+                        fig_occ = px.bar(
+                            df_occ,
+                            x='Fecha_Grafica',
+                            y='Ocurrencias',
+                            color='Tipo de Actividad',
+                            barmode='stack',
+                            color_discrete_map={
+                                'Perforación': '#3ca0e6',
+                                'RMA': '#74b9ff',
+                                'RME': '#ffa854'
+                            },
+                            category_orders={'Tipo de Actividad': ['Perforación', 'RMA', 'RME']}
+                        )
+                        fig_occ.update_layout(
+                            title=dict(
+                                text="Ocurrencia Mensual de Intervenciones",
+                                font=dict(family='Inter, sans-serif', size=16, color='#1a1c1e'),
+                                x=0.5,
+                                xanchor='center'
+                            ),
+                            xaxis_title="Mes (Año-Mes)",
+                            yaxis_title="Cantidad de Intervenciones",
+                            legend_title="Actividad",
+                            font=dict(family='Inter, sans-serif', size=12),
+                            height=360,
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            hovermode='x unified',
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
+                        fig_occ.update_xaxes(type='date', tickformat='%Y-%m', hoverformat='%Y-%m')
+                        
+                        # 2. Cost calculations from JSON
+                        discount_rate_comp = p.get('discount_rate', 15.0)
+                        
+                        import re
+                        def get_subcategory_metrics_from_json(egresos, cat, pattern, dates, discount_rate_annual):
+                            if not egresos or cat not in egresos:
+                                return 0.0, 0.0
+                            pattern_re = re.compile(pattern, re.IGNORECASE)
+                            monthly_flow = None
+                            for row_idx, vals in egresos[cat].items():
+                                if pattern_re.search(str(row_idx)):
+                                    arr_vals = np.array([float(v) for v in vals])
+                                    if monthly_flow is None:
+                                        monthly_flow = arr_vals
+                                    else:
+                                        monthly_flow += arr_vals
+                            
+                            if monthly_flow is None:
+                                return 0.0, 0.0
+                            nominal_sum = float(np.sum(monthly_flow))
+                            
+                            dr = discount_rate_annual / 100.0
+                            monthly_r = (1 + dr) ** (1 / 12) - 1
+                            months = np.arange(len(dates))
+                            discount_factors = (1 + monthly_r) ** months
+                            
+                            if len(monthly_flow) > len(discount_factors):
+                                monthly_flow = monthly_flow[:len(discount_factors)]
+                            elif len(monthly_flow) < len(discount_factors):
+                                discount_factors = discount_factors[:len(monthly_flow)]
+                                
+                            vp_sum = float(np.sum(monthly_flow / discount_factors))
+                            return nominal_sum, vp_sum
+                        
+                        nom_perf_c, vp_perf_c = get_subcategory_metrics_from_json(eg, 'capex', r'Pozo.*Desarrollo.*Media', dates, discount_rate_comp)
+                        nom_rma_c, vp_rma_c = get_subcategory_metrics_from_json(eg, 'capex', r'RMA.*Media', dates, discount_rate_comp)
+                        nom_rme_c, vp_rme_c = get_subcategory_metrics_from_json(eg, 'opex', r'RME.*Media', dates, discount_rate_comp)
+                        
+                        # Layout
+                        col_drc1, col_drc2 = st.columns([1.5, 1])
+                        with col_drc1:
+                            st.plotly_chart(fig_occ, use_container_width=True)
+                        with col_drc2:
+                            drilex_cost_mode_comp = st.segmented_control(
+                                "Tipo de Costo",
+                                options=["Nominal", "Valor Presente (VP)"],
+                                default="Valor Presente (VP)",
+                                key=f"segmented_drilex_cost_mode_comp_{active_esc_name}"
+                            ) or "Valor Presente (VP)"
+                            
+                            labels_drilex = ["Perforación", "RMA", "RME"]
+                            if drilex_cost_mode_comp == "Valor Presente (VP)":
+                                values_drilex = [vp_perf_c, vp_rma_c, vp_rme_c]
+                                unit = "MMUSD (VP)"
+                            else:
+                                values_drilex = [nom_perf_c, nom_rma_c, nom_rme_c]
+                                unit = "MMUSD"
+                            
+                            total_drilex = sum(values_drilex)
+                            colors_drilex = ['#3ca0e6', '#74b9ff', '#ffa854']
+                            
+                            filtered_labels = []
+                            filtered_values = []
+                            for l, v in zip(labels_drilex, values_drilex):
+                                if v > 1e-4:
+                                    filtered_labels.append(l)
+                                    filtered_values.append(v)
+                                    
+                            if filtered_values:
+                                _total = sum(filtered_values)
+                                # Only render inline text for slices that are >= 5% of total;
+                                # tiny slices (RMA/RME when dominated by Perforación) get empty
+                                # text so they don't crowd and overlap the chart title.
+                                _slice_text = [
+                                    f"<b>{l}</b><br>{v:.2f} {unit}" if v / _total >= 0.05 else ""
+                                    for l, v in zip(filtered_labels, filtered_values)
+                                ]
+                                # Pull small slices outward slightly for visual separation
+                                _slice_pull = [0.07 if v / _total < 0.05 else 0 for v in filtered_values]
+
+                                fig_cost_comp = go.Figure(data=[go.Pie(
+                                    labels=filtered_labels,
+                                    values=filtered_values,
+                                    hole=0.5,
+                                    marker=dict(colors=[colors_drilex[labels_drilex.index(l)] for l in filtered_labels]),
+                                    text=_slice_text,
+                                    textinfo='text',
+                                    textposition='inside',
+                                    insidetextorientation='horizontal',
+                                    pull=_slice_pull,
+                                    hovertemplate="<b>%{label}</b><br>Costo: %{value:.2f} " + unit + "<br>Porcentaje: %{percent:.1%}<extra></extra>"
+                                )])
+                                fig_cost_comp.update_layout(
+                                    title=dict(
+                                        text=f"Distribución de Costos DRILEX ({drilex_cost_mode_comp})",
+                                        font=dict(family='Inter, sans-serif', size=15, color='#1a1c1e'),
+                                        x=0.5, xanchor='center', y=0.98, yanchor='top'
+                                    ),
+                                    annotations=[dict(text=f"Total<br><b>{total_drilex:.2f}</b><br>{unit}", x=0.5, y=0.5, font_size=11, showarrow=False, align="center")],
+                                    showlegend=True,
+                                    legend=dict(
+                                        orientation="h", yanchor="bottom", y=-0.15,
+                                        xanchor="center", x=0.5,
+                                        font=dict(size=11), itemsizing='constant'
+                                    ),
+                                    margin=dict(t=50, b=70, l=20, r=20),
+                                    height=400,
+                                    paper_bgcolor='rgba(0,0,0,0)',
+                                    plot_bgcolor='rgba(0,0,0,0)',
+                                )
+                                st.plotly_chart(fig_cost_comp, use_container_width=True)
+                            else:
+                                st.markdown(f"""
+                                <div style="background-color: #f8fafc; border-left: 4px solid #cbd5e1; padding: 20px; border-radius: 12px; height: 400px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02); margin-top: 10px;">
+                                    <div style="font-size: 2.5rem; margin-bottom: 10px;">🚫</div>
+                                    <h5 style="color: #64748b; margin: 0; font-family: 'Space Grotesk', sans-serif; font-weight: 700;">Distribución de Costos DRILEX</h5>
+                                    <p style="color: #94a3b8; font-size: 0.9rem; margin-top: 8px;">No hay costos asociados en este horizonte</p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                    else:
+                        st.info("No hay intervenciones registradas en el horizonte de este escenario.")
+
 with t_det4:
     st.subheader("Net Present Value Distributions (MMUSD)")
     nom_pre   = float(np.mean(np.sum(cf.get('cf_pre_tax', [[0]]),   axis=1)))
@@ -1032,7 +1229,7 @@ with t_det5:
                              paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(b=100), hovermode='x unified')
         st.plotly_chart(fig_cf, width="stretch")
 
-with t_det6a:
+with t_det6:
     _oil_p  = sel_sc.get('params', {}).get('oil_price', '—')
     _gas_p  = sel_sc.get('params', {}).get('gas_price', '—')
     st.markdown(
@@ -1269,7 +1466,8 @@ with t_det6a:
     else:
         st.warning("⚠️ No sensitivity data found for Corner Solutions 1.")
 
-with t_det6b:
+    st.markdown("<hr style='border:none; border-top:1px dashed #cbd5e1; margin:36px 0;' />", unsafe_allow_html=True)
+
     st.subheader("Corner Solutions 2: Royalties vs Oil Price")
     sens_data = sel_sc.get('sensibilidad', [])
     if sens_data:
@@ -1719,7 +1917,321 @@ with t_det7:
         st.warning("⚠️ No Fiscal Optimization data found in this scenario file.")
 
 
+with t_det8:
+    st.header("🏦 Modelo de Caja Autofinanciable y Métricas de Exposición (MCO / TIRM)")
+    st.markdown(
+        "Este análisis evalúa el desempeño financiero del proyecto asumiendo que el "
+        "Contratista dispone de un **Capital Inicial** para cubrir los egresos planificados y "
+        "asegurar las operaciones, de modo que el proyecto posteriormente se **autofinancia** "
+        "a partir de los ingresos generados por la venta de los hidrocarburos."
+    )
 
+    params = sel_sc.get('params', {})
+    aplica_autofin = params.get('aplica_autofin', False)
+
+    if not aplica_autofin:
+        st.info(
+            "💡 Este escenario no tiene activa la opción de Caja Autofinanciable en su configuración."
+        )
+    else:
+        ind = sel_sc.get('indicators', {})
+        cf = sel_sc.get('cash_flows', {})
+        
+        # Get the cases from params or fallback
+        capital_inicial_casos = params.get('capital_inicial_casos', [])
+        if not capital_inicial_casos:
+            cap_base = float(params.get('capital_inicial', 40.0))
+            capital_inicial_casos = [max(0.0, cap_base - 10.0), cap_base, cap_base + 10.0]
+        
+        capital_inicial_casos = [float(x) for x in capital_inicial_casos]
+        
+        autofin_cases = sel_sc.get('autofin_cases', {})
+        if not autofin_cases:
+            st.warning("⚠️ No se encontraron datos pre-calculados de Caja Autofinanciable en este archivo de escenario.")
+        else:
+            # Selector de caso
+            case_options = [
+                f"Caso 1: {capital_inicial_casos[0]:.1f} MMUSD",
+                f"Caso 2 (Base): {capital_inicial_casos[1]:.1f} MMUSD",
+                f"Caso 3: {capital_inicial_casos[2]:.1f} MMUSD"
+            ]
+            
+            selected_label = st.segmented_control(
+                "Seleccionar Caso de Inversión Inicial:",
+                options=case_options,
+                default=case_options[1], # Default to Caso 2
+                key="selected_capital_case"
+            ) or case_options[1]
+            
+            selected_idx = case_options.index(selected_label)
+            selected_case_name = f"caso_{selected_idx+1}"
+            
+            # Extraer datos del caso seleccionado
+            case_data = autofin_cases[selected_case_name]
+            capital_inicial_selected = float(case_data['capital'])
+            
+            mco_val = np.mean(case_data['mco_autofin'])
+            min_pool_val = np.mean(case_data['min_pool_months'])
+            payback_val = np.mean(case_data['payback_months_autofin'])
+            tirm_val = case_data['tirm_investor']
+            moic_val = np.mean(case_data['moic_investor'])
+            npv_val = np.mean(case_data['npv_investor'])
+            
+            # Standard metrics for comparison
+            std_mco = np.mean(ind.get('max_financing_mm', [0.0]))
+            std_payout = np.mean(ind.get('payout_years', [0.0])) * 12.0
+            std_tirm = ind.get('irr_post_annual', 0.0)
+            std_moic = np.mean(ind.get('moic', [0.0]))
+            std_npv = np.mean(ind.get('npv_hpoc_post', [0.0]))
+            std_min_box_month = int(np.mean(np.argmin(np.array(cf.get('cum_cf_post', [[0.0]])), axis=1))) + 1
+
+            st.markdown(f"### 📊 Indicadores Clave del Inversionista — Caso Evaluado: {capital_inicial_selected:.1f} MMUSD")
+            
+            col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+            
+            card_html = """
+            <div style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border-top: 4px solid {color}; text-align: center; height: 100%;">
+                <div style="color: #718096; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; margin-bottom: 8px;">{title}</div>
+                <div style="color: #2d3748; font-size: 1.8rem; font-weight: 800; margin-bottom: 4px;">{value}</div>
+                <div style="color: #a0aec0; font-size: 0.7rem; font-style: italic;">{subtitle}</div>
+            </div>
+            """
+            
+            with col_k1:
+                st.markdown(card_html.format(
+                    title="CAPITAL INICIAL (C₀)",
+                    value=f"{capital_inicial_selected:.1f} MMUSD",
+                    subtitle="Capital aportado al inicio",
+                    color="#4a5568"
+                ), unsafe_allow_html=True)
+            with col_k2:
+                st.markdown(card_html.format(
+                    title="EXPOSICIÓN MÁXIMA (MCO)",
+                    value=f"{mco_val:.2f} MMUSD",
+                    subtitle="Financiamiento total requerido",
+                    color="#dc2626"
+                ), unsafe_allow_html=True)
+            with col_k3:
+                st.markdown(card_html.format(
+                    title="MES DE MÍNIMA CAJA",
+                    value=f"Mes {int(round(min_pool_val)) + 1}",
+                    subtitle="Punto más bajo del balance",
+                    color="#d97706"
+                ), unsafe_allow_html=True)
+            with col_k4:
+                st.markdown(card_html.format(
+                    title="MES AUTOFINANCIAMIENTO",
+                    value=f"Mes {int(round(payback_val))}" if payback_val < len(dates) else "N/A",
+                    subtitle="Recuperación total de inversión",
+                    color="#16a34a"
+                ), unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            col_k5, col_k6, col_k7 = st.columns(3)
+            with col_k5:
+                tirm_str = f"{tirm_val:.2f}%" if tirm_val is not None and np.isfinite(tirm_val) else "N/A"
+                st.markdown(card_html.format(
+                    title="TIRM DEL INVERSIONISTA",
+                    value=tirm_str,
+                    subtitle="Tasa Interna Retorno Modificada",
+                    color="#00d4ff"
+                ), unsafe_allow_html=True)
+            with col_k6:
+                st.markdown(card_html.format(
+                    title="MOIC INVERSIONISTA",
+                    value=f"{moic_val:.2f}x",
+                    subtitle="Múltiplo de capital retornado",
+                    color="#9C27B0"
+                ), unsafe_allow_html=True)
+            with col_k7:
+                st.markdown(card_html.format(
+                    title="VPN INVERSIONISTA",
+                    value=f"{npv_val:.2f} MMUSD",
+                    subtitle=f"Valor Presente Neto (a {params.get('discount_rate', 15.0):.1f}%)",
+                    color="#4CAF50"
+                ), unsafe_allow_html=True)
+
+            st.markdown("---")
+            
+            # ── CHART SECTION: CURVAS J COMPARATIVAS ──
+            st.subheader(f"📈 Curvas en J y Balance de Caja ({selected_label})")
+            st.markdown(
+                "La siguiente gráfica muestra el **Balance de Caja** acumulado en el fondo del proyecto "
+                "(es decir, los recursos líquidos disponibles en el proyecto, que empiezan en $C_0$) y el "
+                "**Flujo de Caja Acumulado del Inversionista** (que representa las entradas y salidas netas desde "
+                "la perspectiva del socio inversor)."
+            )
+            
+            pool_p10, pool_p50, pool_p90 = np.percentile(case_data['cash_pool_autofin'], [10, 50, 90], axis=0)
+            inv_cum_p10, inv_cum_p50, inv_cum_p90 = np.percentile(case_data['cum_cf_investor_post_tax'], [10, 50, 90], axis=0)
+            
+            start_date_val = pd.Timestamp(dates[0])
+            m0_date = start_date_val - pd.DateOffset(months=1)
+            dates_with_m0 = [m0_date] + list(dates)
+            
+            fig_j = go.Figure()
+            
+            # 1. Project Cash Pool (Primary Y axis)
+            fig_j.add_trace(go.Scatter(
+                x=dates, y=pool_p50,
+                name="Balance de Caja (P50)",
+                line=dict(color="#d97706", width=3),
+                legendgroup="pool"
+            ))
+            fig_j.add_trace(go.Scatter(
+                x=dates, y=pool_p10,
+                name="Balance de Caja (P10-P90)",
+                line=dict(color="#d97706", width=1),
+                opacity=0.25,
+                legendgroup="pool",
+                showlegend=False
+            ))
+            fig_j.add_trace(go.Scatter(
+                x=dates, y=pool_p90,
+                name="Balance de Caja P90",
+                line=dict(color="#d97706", width=1),
+                fill='tonexty',
+                fillcolor='rgba(217, 119, 6, 0.1)',
+                opacity=0.25,
+                legendgroup="pool",
+                showlegend=False
+            ))
+            
+            # 2. Investor Cumulative Cash Flow (Secondary Y axis)
+            fig_j.add_trace(go.Scatter(
+                x=dates_with_m0, y=inv_cum_p50,
+                name="Flujo Acumulado Inversionista (P50)",
+                line=dict(color="#2196F3", width=3, dash='dash'),
+                yaxis="y2",
+                legendgroup="inv"
+            ))
+            fig_j.add_trace(go.Scatter(
+                x=dates_with_m0, y=inv_cum_p10,
+                line=dict(color="#2196F3", width=1, dash='dash'),
+                opacity=0.2,
+                yaxis="y2",
+                legendgroup="inv",
+                showlegend=False
+            ))
+            fig_j.add_trace(go.Scatter(
+                x=dates_with_m0, y=inv_cum_p90,
+                line=dict(color="#2196F3", width=1, dash='dash'),
+                fill='tonexty',
+                fillcolor='rgba(33, 150, 243, 0.08)',
+                opacity=0.2,
+                yaxis="y2",
+                legendgroup="inv",
+                showlegend=False
+            ))
+            
+            fig_j.add_hline(y=0.0, line_dash="dot", line_color="rgba(0,0,0,0.3)", yref="y2")
+            fig_j.add_hline(y=capital_inicial_selected, line_dash="dashdot", line_color="rgba(217, 119, 6, 0.4)", yref="y",
+                            annotation_text=f"Capital Inicial: {capital_inicial_selected:.1f} MMUSD", annotation_position="top left")
+            
+            fig_j.update_layout(
+                title=dict(
+                    text=f"Curva en J y Pool de Caja del Proyecto ({selected_label})",
+                    font=dict(family='Inter, sans-serif', size=16, color="#2d3748"),
+                ),
+                xaxis=dict(title="Fecha", showgrid=True, gridcolor='rgba(0,0,0,0.05)'),
+                yaxis=dict(title="Balance del Fondo de Caja (MMUSD)", showgrid=True, gridcolor='rgba(0,0,0,0.05)'),
+                yaxis2=dict(title="Flujo Acumulado Inversionista (MMUSD)", overlaying="y", side="right", showgrid=False),
+                legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                margin=dict(t=50, b=100, l=50, r=50),
+                height=450,
+                hovermode="x unified"
+            )
+            
+            st.plotly_chart(fig_j, use_container_width=True)
+
+            st.markdown("---")
+            
+            # ── COMPARATIVE TABLE SECTION ──
+            st.subheader("⚖️ Comparación de Escenarios: Modelo Estándar vs. Casos de Inversión")
+            st.markdown(
+                "La siguiente tabla compara las métricas clave de rentabilidad y exposición "
+                "bajo el modelo estándar del Contratista (sin capital inicial retenido) y los "
+                "tres casos evaluados de **Capital Inicial (MMUSD)**."
+            )
+            
+            c1_data = autofin_cases['caso_1']
+            c2_data = autofin_cases['caso_2']
+            c3_data = autofin_cases['caso_3']
+            
+            c1_tirm = f"{c1_data['tirm_investor']:.2f}%" if c1_data['tirm_investor'] is not None and np.isfinite(c1_data['tirm_investor']) else "N/A"
+            c2_tirm = f"{c2_data['tirm_investor']:.2f}%" if c2_data['tirm_investor'] is not None and np.isfinite(c2_data['tirm_investor']) else "N/A"
+            c3_tirm = f"{c3_data['tirm_investor']:.2f}%" if c3_data['tirm_investor'] is not None and np.isfinite(c3_data['tirm_investor']) else "N/A"
+            std_tirm_str = f"{std_tirm:.2f}%" if std_tirm is not None and np.isfinite(std_tirm) else "N/A"
+            
+            c1_pay = f"Mes {int(round(np.mean(c1_data['payback_months_autofin'])))}" if np.mean(c1_data['payback_months_autofin']) < len(dates) else "N/A"
+            c2_pay = f"Mes {int(round(np.mean(c2_data['payback_months_autofin'])))}" if np.mean(c2_data['payback_months_autofin']) < len(dates) else "N/A"
+            c3_pay = f"Mes {int(round(np.mean(c3_data['payback_months_autofin'])))}" if np.mean(c3_data['payback_months_autofin']) < len(dates) else "N/A"
+            std_pay = f"Mes {int(round(std_payout))}" if std_payout < len(dates) else "N/A"
+            
+            comparison_rows = [
+                {
+                    "Métrica": "Capital Inicial Aportado (C₀)",
+                    "Modelo Estándar (Sin Buffer)": "0.0 MMUSD",
+                    "Caso 1": f"{float(capital_inicial_casos[0]):.1f} MMUSD",
+                    "Caso 2 (Base)": f"{float(capital_inicial_casos[1]):.1f} MMUSD",
+                    "Caso 3": f"{float(capital_inicial_casos[2]):.1f} MMUSD",
+                },
+                {
+                    "Métrica": "Máxima Exposición de Caja (MCO)",
+                    "Modelo Estándar (Sin Buffer)": f"{std_mco:.2f} MMUSD",
+                    "Caso 1": f"{np.mean(c1_data['mco_autofin']):.2f} MMUSD",
+                    "Caso 2 (Base)": f"{np.mean(c2_data['mco_autofin']):.2f} MMUSD",
+                    "Caso 3": f"{np.mean(c3_data['mco_autofin']):.2f} MMUSD",
+                },
+                {
+                    "Métrica": "Mes de Mínima Caja",
+                    "Modelo Estándar (Sin Buffer)": f"Mes {std_min_box_month}",
+                    "Caso 1": f"Mes {int(round(np.mean(c1_data['min_pool_months']))) + 1}",
+                    "Caso 2 (Base)": f"Mes {int(round(np.mean(c2_data['min_pool_months']))) + 1}",
+                    "Caso 3": f"Mes {int(round(np.mean(c3_data['min_pool_months']))) + 1}",
+                },
+                {
+                    "Métrica": "Mes Autofinanciamiento / Payback",
+                    "Modelo Estándar (Sin Buffer)": std_pay,
+                    "Caso 1": c1_pay,
+                    "Caso 2 (Base)": c2_pay,
+                    "Caso 3": c3_pay,
+                },
+                {
+                    "Métrica": "TIRM Post-Tax (%)",
+                    "Modelo Estándar (Sin Buffer)": std_tirm_str,
+                    "Caso 1": c1_tirm,
+                    "Caso 2 (Base)": c2_tirm,
+                    "Caso 3": c3_tirm,
+                },
+                {
+                    "Métrica": "MOIC (Múltiplo de Inversión)",
+                    "Modelo Estándar (Sin Buffer)": f"{std_moic:.2f}x",
+                    "Caso 1": f"{np.mean(c1_data['moic_investor']):.2f}x",
+                    "Caso 2 (Base)": f"{np.mean(c2_data['moic_investor']):.2f}x",
+                    "Caso 3": f"{np.mean(c3_data['moic_investor']):.2f}x",
+                },
+                {
+                    "Métrica": "VPN Post-Tax (MMUSD)",
+                    "Modelo Estándar (Sin Buffer)": f"{std_npv:.2f} MMUSD",
+                    "Caso 1": f"{np.mean(c1_data['npv_investor']):.2f} MMUSD",
+                    "Caso 2 (Base)": f"{np.mean(c2_data['npv_investor']):.2f} MMUSD",
+                    "Caso 3": f"{np.mean(c3_data['npv_investor']):.2f} MMUSD",
+                }
+            ]
+            
+            df_compare = pd.DataFrame(comparison_rows)
+            st.dataframe(df_compare, use_container_width=True, hide_index=True)
+            
+            st.caption(
+                "⚠️ **Nota sobre la TIRM:** La TIRM del inversionista calcula el retorno sobre los flujos "
+                "de caja del inversionista (que inyecta $C_0$ en el mes 0 y recibe distribuciones solo "
+                "cuando el fondo del proyecto excede $C_0$). Al estar más diferidas las distribuciones en el tiempo, "
+                "la TIRM tiende a ser menor que en el modelo estándar, pero representa una estimación más "
+                "realista del costo de oportunidad del capital inmovilizado."
+            )
 
 
 # ─── SECTION 3: MULTI-SCENARIO TABLE ──────────────────────────────────────
